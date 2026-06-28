@@ -20,7 +20,7 @@ import requests
 # ─────────────────────────────────────────────
 # ⚠️ 填入你的設定
 # ─────────────────────────────────────────────
-JQUANTS_API_KEY = "jbuGTyLu8wTS7iS8qvkFPSz4sLtBST9EtKqfWRGDAiQ"
+JQUANTS_API_KEY = "填入你的J-Quants_API_Key"
 
 TODAY = date.today().strftime("%Y-%m-%d")
 DATA_DIR = Path("data") / TODAY
@@ -175,8 +175,32 @@ def to_csv_df(records: list[dict]) -> pd.DataFrame:
             "成交量(千股)": rec["成交量_千股"],
             "成交金額(億日圓)": rec["成交金額_億"],
             "時間": TODAY,
+            "漲停": "是" if is_limit_up(rec["收盤"], rec["昨收"]) else "",
         })
     return pd.DataFrame(rows)
+
+
+def calc_daily_limit(prev_close: float) -> float:
+    """依前收盤價計算日股當日漲停幅度（円）"""
+    if prev_close <= 0:
+        return 0.0
+    limits = [
+        (100, 30), (200, 50), (500, 80), (700, 100),
+        (1000, 150), (1500, 300), (2000, 400), (3000, 500),
+        (5000, 700), (7000, 1000), (10000, 1500),
+    ]
+    for threshold, limit in limits:
+        if prev_close < threshold:
+            return float(limit)
+    return prev_close * 0.15  # 10000円以上：15%
+
+
+def is_limit_up(close: float, prev_close: float) -> bool:
+    """判斷是否漲停"""
+    if prev_close <= 0 or close <= 0:
+        return False
+    limit = calc_daily_limit(prev_close)
+    return (close - prev_close) >= limit * 0.99  # 允許1%誤差
 
 
 def build_ranking(df: pd.DataFrame) -> pd.DataFrame:
