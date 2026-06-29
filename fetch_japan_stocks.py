@@ -20,7 +20,7 @@ import requests
 # ─────────────────────────────────────────────
 # ⚠️ 填入你的設定
 # ─────────────────────────────────────────────
-JQUANTS_API_KEY = "填入你的J-Quants_API_Key"
+JQUANTS_API_KEY = "jbuGTyLu8wTS7iS8qvkFPSz4sLtBST9EtKqfWRGDAiQ"
 
 TODAY = date.today().strftime("%Y-%m-%d")
 DATA_DIR = Path("data") / TODAY
