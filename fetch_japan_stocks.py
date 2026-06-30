@@ -7,8 +7,14 @@
 產生兩份 CSV：
   data/{今天日期}/日本上市收盤價.csv
   data/{今天日期}/日本排行榜.csv
+
+使用方式：
+  python fetch_japan_stocks.py                 # 整批抓全市場
+  python fetch_japan_stocks.py --symbol 6981    # 只查單一代號（跨市場對應股價用，4或5位數皆可）
 """
 
+import argparse
+import json
 import sys
 import time
 from datetime import date, timedelta
@@ -24,7 +30,6 @@ JQUANTS_API_KEY = "jbuGTyLu8wTS7iS8qvkFPSz4sLtBST9EtKqfWRGDAiQ"
 
 TODAY = date.today().strftime("%Y-%m-%d")
 DATA_DIR = Path("data") / TODAY
-DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 JQUANTS_BASE = "https://api.jquants.com/v2"
 YAHOO_BASE = "https://query1.finance.yahoo.com/v8/finance/chart"
@@ -59,7 +64,6 @@ def fetch_symbol_list() -> list[dict]:
     print(f"  全市場銘柄：{len(all_stocks)} 檔")
 
     # 過濾 Prime + Standard，排除 ETF（代號非純4位數字）
-    import re
     # V2 API 欄位：Mkt=市場代碼(0111=Prime, 0112=Standard)
     filtered = [
         s for s in all_stocks
@@ -74,10 +78,17 @@ def fetch_symbol_list() -> list[dict]:
 # Step 2: 用 Yahoo Finance 抓收盤價
 # ─────────────────────────────────────────────
 
+def normalize_yahoo_code(code: str) -> str:
+    """J-Quants 代號是5位數（如13010），Yahoo 需要4位數（如1301.T）"""
+    code = str(code).strip()
+    if len(code) == 5 and code.endswith("0"):
+        return code[:-1]
+    return code
+
+
 def fetch_yahoo_price(code: str) -> dict | None:
     """抓單一股票當日收盤價"""
-    # J-Quants 代號是5位數（如13010），Yahoo 需要4位數（如1301.T）
-    yahoo_code = code[:-1] if len(code) == 5 and code.endswith("0") else code
+    yahoo_code = normalize_yahoo_code(code)
     symbol = f"{yahoo_code}.T"
     try:
         r = requests.get(
@@ -246,6 +257,38 @@ def build_ranking(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────
+# 單一代號查詢模式（給跨市場對應股價用）
+# ─────────────────────────────────────────────
+
+def lookup_single_symbol(code: str) -> dict | None:
+    """給一個代號（4或5位數皆可），查詢當日漲跌幅"""
+    price = fetch_yahoo_price(code)
+    if price and price.get("收盤", 0):
+        price["代號"] = normalize_yahoo_code(code)
+        price["漲停"] = is_limit_up(price["收盤"], price["昨收"])
+        return price
+    return None
+
+
+def cmd_single_symbol(code: str):
+    """CLI 單一代號查詢，輸出 JSON 方便 Claude Code 解析"""
+    result = lookup_single_symbol(code)
+    if result is None:
+        print(json.dumps({"代號": code, "找到": False}, ensure_ascii=False))
+        sys.exit(1)
+    output = {
+        "代號": result["代號"],
+        "找到": True,
+        "收盤": result["收盤"],
+        "漲跌幅(%)": result["漲跌幅"],
+        "漲停": result["漲停"],
+        "資料日期": TODAY,
+    }
+    print(json.dumps(output, ensure_ascii=False))
+    sys.exit(0)
+
+
+# ─────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────
 
@@ -256,6 +299,8 @@ def main():
     if JQUANTS_API_KEY == "填入你的J-Quants_API_Key":
         print("[錯誤] 請先填入 JQUANTS_API_KEY")
         sys.exit(1)
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     # 取代號清單
     symbols = fetch_symbol_list()
@@ -291,4 +336,11 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(0 if main() else 1)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--symbol", help="只查詢單一代號的當日漲跌幅（不執行整批爬蟲）")
+    args = parser.parse_args()
+
+    if args.symbol:
+        cmd_single_symbol(args.symbol)
+    else:
+        sys.exit(0 if main() else 1)
